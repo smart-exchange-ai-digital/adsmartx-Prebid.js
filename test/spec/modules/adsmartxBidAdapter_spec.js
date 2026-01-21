@@ -172,7 +172,7 @@ describe('AdSmartX adapter', () => {
       const request = spec.buildRequests([validBidRequest], bidderRequest);
       expect(request).to.be.an('object');
       expect(request.method).to.equal('POST');
-      expect(request.url).to.equal('https://dev-ads.risemediatech.com/ads/rtb/prebid/js');
+      expect(request.url).to.equal('https://ads.adsmartx.com/ads/rtb/prebid/js');
       expect(request.data).to.be.an('object');
     });
 
@@ -489,9 +489,695 @@ describe('AdSmartX adapter', () => {
   });
 
   describe('getUserSyncs', () => {
-    it('should return null as user syncs are not implemented', () => {
-      const syncs = spec.getUserSyncs({ iframeEnabled: true }, [], bidderRequest.gdprConsent, bidderRequest.uspConsent);
-      expect(syncs).to.be.null;
+    it('should return empty array if neither iframe nor pixel is enabled', () => {
+      const syncs = spec.getUserSyncs({ iframeEnabled: false, pixelEnabled: false }, [], bidderRequest.gdprConsent, bidderRequest.uspConsent);
+      expect(syncs).to.be.an('array').that.is.empty;
+    });
+
+    it('should return iframe sync when iframeEnabled is true', () => {
+      const syncs = spec.getUserSyncs({ iframeEnabled: true, pixelEnabled: false }, []);
+      expect(syncs).to.be.an('array').with.lengthOf(1);
+      expect(syncs[0]).to.have.property('type', 'iframe');
+      expect(syncs[0]).to.have.property('url');
+      expect(syncs[0].url).to.include('https://ads.adsmartx.com/sync');
+    });
+
+    it('should return image sync when only pixelEnabled is true', () => {
+      const syncs = spec.getUserSyncs({ iframeEnabled: false, pixelEnabled: true }, []);
+      expect(syncs).to.be.an('array').with.lengthOf(1);
+      expect(syncs[0]).to.have.property('type', 'image');
+      expect(syncs[0]).to.have.property('url');
+    });
+
+    it('should include GDPR consent parameters in sync URL', () => {
+      const syncs = spec.getUserSyncs(
+        { iframeEnabled: true },
+        [],
+        { gdprApplies: true, consentString: 'consent123' }
+      );
+      expect(syncs[0].url).to.include('gdpr=1');
+      expect(syncs[0].url).to.include('gdpr_consent=consent123');
+    });
+
+    it('should include gdpr=0 when gdprApplies is false', () => {
+      const syncs = spec.getUserSyncs(
+        { iframeEnabled: true },
+        [],
+        { gdprApplies: false, consentString: 'consent123' }
+      );
+      expect(syncs[0].url).to.include('gdpr=0');
+      expect(syncs[0].url).to.include('gdpr_consent=consent123');
+    });
+
+    it('should include USP consent parameter in sync URL', () => {
+      const syncs = spec.getUserSyncs(
+        { iframeEnabled: true },
+        [],
+        undefined,
+        '1YNN'
+      );
+      expect(syncs[0].url).to.include('us_privacy=1YNN');
+    });
+
+    it('should include GPP consent parameters in sync URL', () => {
+      const gppConsent = {
+        gppString: 'DBABLA~1YNN',
+        applicableSections: [7, 8]
+      };
+      const syncs = spec.getUserSyncs(
+        { iframeEnabled: true },
+        [],
+        undefined,
+        undefined,
+        gppConsent
+      );
+      expect(syncs[0].url).to.include('gpp=DBABLA~1YNN');
+      expect(syncs[0].url).to.include('gpp_sid=7%2C8');
+    });
+
+    it('should not include GPP if gppString is missing', () => {
+      const gppConsent = {
+        applicableSections: [7, 8]
+      };
+      const syncs = spec.getUserSyncs(
+        { iframeEnabled: true },
+        [],
+        undefined,
+        undefined,
+        gppConsent
+      );
+      expect(syncs[0].url).to.not.include('gpp=');
+    });
+
+    it('should not include GPP if applicableSections is empty', () => {
+      const gppConsent = {
+        gppString: 'DBABLA~1YNN',
+        applicableSections: []
+      };
+      const syncs = spec.getUserSyncs(
+        { iframeEnabled: true },
+        [],
+        undefined,
+        undefined,
+        gppConsent
+      );
+      expect(syncs[0].url).to.not.include('gpp=');
+    });
+
+    it('should include custom sync parameters from bid params (sspId, siteId, sspUserId)', () => {
+      const bidWithParams = {
+        ...validBidRequest,
+        params: {
+          ...validBidRequest.params,
+          sspId: 'ssp123',
+          siteId: 'site456',
+          sspUserId: 'user789'
+        }
+      };
+
+      const testBidderRequest = {
+        ...bidderRequest,
+        bids: [bidWithParams]
+      };
+
+      // First build request to store sync params
+      spec.buildRequests([bidWithParams], testBidderRequest);
+
+      // Then call getUserSyncs
+      const syncs = spec.getUserSyncs({ iframeEnabled: true }, []);
+      expect(syncs[0].url).to.include('ssp_id=ssp123');
+      expect(syncs[0].url).to.include('ssp_site_id=site456');
+      expect(syncs[0].url).to.include('ssp_user_id=user789');
+    });
+
+    it('should include iframe_enabled flag in sync URL', () => {
+      const syncs = spec.getUserSyncs({ iframeEnabled: true, pixelEnabled: false }, []);
+      expect(syncs[0].url).to.include('iframe_enabled=true');
+    });
+
+    it('should set iframe_enabled=false when only pixel is enabled', () => {
+      const syncs = spec.getUserSyncs({ iframeEnabled: false, pixelEnabled: true }, []);
+      expect(syncs[0].url).to.include('iframe_enabled=false');
+    });
+
+    it('should include all consent parameters together', () => {
+      const bidWithParams = {
+        ...validBidRequest,
+        params: {
+          ...validBidRequest.params,
+          sspId: 'ssp123',
+          siteId: 'site456',
+          sspUserId: 'user789'
+        }
+      };
+
+      const testBidderRequest = {
+        ...bidderRequest,
+        bids: [bidWithParams]
+      };
+
+      spec.buildRequests([bidWithParams], testBidderRequest);
+
+      const gppConsent = {
+        gppString: 'DBABLA~1YNN',
+        applicableSections: [7]
+      };
+
+      const syncs = spec.getUserSyncs(
+        { iframeEnabled: true },
+        [],
+        { gdprApplies: true, consentString: 'consent123' },
+        '1YNN',
+        gppConsent
+      );
+
+      expect(syncs[0].url).to.include('gdpr=1');
+      expect(syncs[0].url).to.include('gdpr_consent=consent123');
+      expect(syncs[0].url).to.include('us_privacy=1YNN');
+      expect(syncs[0].url).to.include('gpp=');
+      expect(syncs[0].url).to.include('gpp_sid=7');
+      expect(syncs[0].url).to.include('ssp_id=ssp123');
+      expect(syncs[0].url).to.include('ssp_site_id=site456');
+      expect(syncs[0].url).to.include('ssp_user_id=user789');
+    });
+
+    it('should handle missing GDPR consentString gracefully', () => {
+      const syncs = spec.getUserSyncs(
+        { iframeEnabled: true },
+        [],
+        { gdprApplies: true }
+      );
+      expect(syncs[0].url).to.include('gdpr=1');
+      expect(syncs[0].url).to.include('gdpr_consent=');
+    });
+
+    it('should retrieve sspUserId from ortb2.user.id when not in bid params', () => {
+      const bidWithoutUserId = {
+        ...validBidRequest,
+        params: {
+          ...validBidRequest.params,
+          sspId: 'ssp123'
+        }
+      };
+
+      const bidderRequestWithOrtb2 = {
+        ...bidderRequest,
+        bids: [bidWithoutUserId],
+        ortb2: {
+          user: {
+            id: 'ortb2-user-id-123'
+          }
+        }
+      };
+
+      spec.buildRequests([bidWithoutUserId], bidderRequestWithOrtb2);
+
+      const syncs = spec.getUserSyncs({ iframeEnabled: true }, []);
+      expect(syncs[0].url).to.include('ssp_user_id=ortb2-user-id-123');
+    });
+
+    it('should prioritize sspUserId from bid params over ortb2.user.id', () => {
+      const bidWithUserId = {
+        ...validBidRequest,
+        params: {
+          ...validBidRequest.params,
+          sspUserId: 'bid-param-user-id'
+        }
+      };
+
+      const bidderRequestWithOrtb2 = {
+        ...bidderRequest,
+        bids: [bidWithUserId],
+        ortb2: {
+          user: {
+            id: 'ortb2-user-id-123'
+          }
+        }
+      };
+
+      spec.buildRequests([bidWithUserId], bidderRequestWithOrtb2);
+
+      const syncs = spec.getUserSyncs({ iframeEnabled: true }, []);
+      expect(syncs[0].url).to.include('ssp_user_id=bid-param-user-id');
+      expect(syncs[0].url).to.not.include('ortb2-user-id-123');
+    });
+
+    it('should generate sync URL with no query parameters when no data is available', () => {
+      // Clear any stored sync params by not calling buildRequests
+      // This tests the edge case where getUserSyncs is called without any prior context
+      const syncs = spec.getUserSyncs(
+        { iframeEnabled: true, pixelEnabled: false },
+        [],
+        undefined,
+        undefined,
+        undefined
+      );
+
+      expect(syncs).to.be.an('array').with.lengthOf(1);
+      expect(syncs[0].type).to.equal('iframe');
+      expect(syncs[0].url).to.include('https://ads.adsmartx.com/sync');
+      expect(syncs[0].url).to.include('iframe_enabled=true');
+    });
+  });
+
+  describe('buildRequests - additional scenarios', () => {
+    it('should set ext.test to 1 when testMode=1 is in bid params', () => {
+      const bidWithTestMode = {
+        ...validBidRequest,
+        params: {
+          ...validBidRequest.params,
+          testMode: 1
+        }
+      };
+
+      const testBidderRequest = {
+        ...bidderRequest,
+        bids: [bidWithTestMode]
+      };
+
+      const request = spec.buildRequests([bidWithTestMode], testBidderRequest);
+      expect(request.data).to.have.property('ext');
+      expect(request.data.ext).to.have.property('test', 1);
+    });
+
+    it('should not set ext.test when testMode is not present', () => {
+      const testBidderRequest = {
+        ...bidderRequest,
+        bids: [validBidRequest]
+      };
+      const request = spec.buildRequests([validBidRequest], testBidderRequest);
+      if (request.data.ext) {
+        expect(request.data.ext).to.not.have.property('test');
+      }
+    });
+
+    it('should include sspId in request.ext when present in bid params', () => {
+      const bidWithSspId = {
+        ...validBidRequest,
+        params: {
+          ...validBidRequest.params,
+          sspId: 'ssp123'
+        }
+      };
+
+      const testBidderRequest = {
+        ...bidderRequest,
+        bids: [bidWithSspId]
+      };
+
+      const request = spec.buildRequests([bidWithSspId], testBidderRequest);
+      expect(request.data).to.have.property('ext');
+      expect(request.data.ext).to.have.property('sspId', 'ssp123');
+    });
+
+    it('should include siteId in request.ext when present in bid params', () => {
+      const bidWithSiteId = {
+        ...validBidRequest,
+        params: {
+          ...validBidRequest.params,
+          siteId: 'site456'
+        }
+      };
+
+      const testBidderRequest = {
+        ...bidderRequest,
+        bids: [bidWithSiteId]
+      };
+
+      const request = spec.buildRequests([bidWithSiteId], testBidderRequest);
+      expect(request.data).to.have.property('ext');
+      expect(request.data.ext).to.have.property('siteId', 'site456');
+    });
+
+    it('should include both sspId and siteId in request.ext when both present', () => {
+      const bidWithBothIds = {
+        ...validBidRequest,
+        params: {
+          ...validBidRequest.params,
+          sspId: 'ssp123',
+          siteId: 'site456'
+        }
+      };
+
+      const testBidderRequest = {
+        ...bidderRequest,
+        bids: [bidWithBothIds]
+      };
+
+      const request = spec.buildRequests([bidWithBothIds], testBidderRequest);
+      expect(request.data).to.have.property('ext');
+      expect(request.data.ext).to.have.property('sspId', 'ssp123');
+      expect(request.data.ext).to.have.property('siteId', 'site456');
+    });
+
+    it('should store sync parameters from first bid for getUserSyncs', () => {
+      const bidWithSyncParams = {
+        ...validBidRequest,
+        params: {
+          ...validBidRequest.params,
+          sspId: 'ssp789',
+          siteId: 'site012',
+          sspUserId: 'user345'
+        }
+      };
+
+      const testBidderRequest = {
+        ...bidderRequest,
+        bids: [bidWithSyncParams]
+      };
+
+      spec.buildRequests([bidWithSyncParams], testBidderRequest);
+
+      // Verify params are stored by calling getUserSyncs
+      const syncs = spec.getUserSyncs({ iframeEnabled: true }, []);
+      expect(syncs[0].url).to.include('ssp_id=ssp789');
+      expect(syncs[0].url).to.include('ssp_site_id=site012');
+      expect(syncs[0].url).to.include('ssp_user_id=user345');
+    });
+
+    it('should include bidfloor in impression when present in bid params', () => {
+      const bidWithFloor = {
+        ...validBidRequest,
+        params: {
+          ...validBidRequest.params,
+          bidfloor: 0.5
+        }
+      };
+
+      const request = spec.buildRequests([bidWithFloor], bidderRequest);
+      expect(request.data.imp[0]).to.have.property('bidfloor', 0.5);
+    });
+
+    it('should not include bidfloor when not present in bid params', () => {
+      const request = spec.buildRequests([validBidRequest], bidderRequest);
+      expect(request.data.imp[0]).to.not.have.property('bidfloor');
+    });
+
+    it('should set request.tmax to bidderRequest.timeout', () => {
+      const request = spec.buildRequests([validBidRequest], bidderRequest);
+      expect(request.data).to.have.property('tmax', 3000);
+    });
+
+    it('should set request.cur to [USD]', () => {
+      const request = spec.buildRequests([validBidRequest], bidderRequest);
+      expect(request.data).to.have.property('cur').that.deep.equals(['USD']);
+    });
+
+    it('should enable endpoint compression in options', () => {
+      const request = spec.buildRequests([validBidRequest], bidderRequest);
+      expect(request.options).to.have.property('endpointCompression', true);
+    });
+
+    it('should handle empty validBidRequests array gracefully', () => {
+      const request = spec.buildRequests([], bidderRequest);
+      expect(request).to.be.an('object');
+      expect(request.data.imp).to.be.an('array').that.is.empty;
+    });
+
+    it('should handle bidderRequest without GDPR consent', () => {
+      const noBidderRequest = {
+        ...bidderRequest,
+        gdprConsent: undefined,
+        uspConsent: undefined
+      };
+      const request = spec.buildRequests([validBidRequest], noBidderRequest);
+      expect(request.data).to.not.have.property('regs');
+      expect(request.data).to.not.have.property('user');
+    });
+  });
+
+  describe('interpretResponse - additional scenarios', () => {
+    it('should set mediaType to video and include vastXml when mtype is 2', () => {
+      const videoResponse = {
+        body: {
+          id: '2def',
+          seatbid: [
+            {
+              bid: [
+                {
+                  id: '1abc',
+                  impid: '1abc',
+                  price: 2.5,
+                  adm: '<VAST version="3.0">...</VAST>',
+                  w: 640,
+                  h: 480,
+                  crid: 'video-creative-123',
+                  adomain: ['video-example.com'],
+                  mtype: 2
+                }
+              ]
+            }
+          ]
+        }
+      };
+
+      const request = spec.buildRequests([validBidRequest], bidderRequest);
+      const bids = spec.interpretResponse(videoResponse, request);
+
+      expect(bids).to.be.an('array').with.lengthOf(1);
+      expect(bids[0]).to.have.property('mediaType', 'video');
+      expect(bids[0]).to.have.property('vastXml', '<VAST version="3.0">...</VAST>');
+    });
+
+    it('should set mediaType to banner when mtype is 1', () => {
+      const bannerResponse = {
+        body: {
+          id: '2def',
+          seatbid: [
+            {
+              bid: [
+                {
+                  id: '1abc',
+                  impid: '1abc',
+                  price: 1.5,
+                  adm: '<div>Banner Ad</div>',
+                  w: 300,
+                  h: 250,
+                  crid: 'banner-creative-123',
+                  adomain: ['banner-example.com'],
+                  mtype: 1
+                }
+              ]
+            }
+          ]
+        }
+      };
+
+      const request = spec.buildRequests([validBidRequest], bidderRequest);
+      const bids = spec.interpretResponse(bannerResponse, request);
+
+      expect(bids).to.be.an('array').with.lengthOf(1);
+      expect(bids[0]).to.have.property('mediaType', 'banner');
+      expect(bids[0]).to.not.have.property('vastXml');
+    });
+
+    it('should use custom currency from response if provided', () => {
+      const responseWithCurrency = {
+        body: {
+          id: '2def',
+          cur: 'EUR',
+          seatbid: [
+            {
+              bid: [
+                {
+                  id: '1abc',
+                  impid: '1abc',
+                  price: 1.5,
+                  adm: '<div>Ad</div>',
+                  w: 300,
+                  h: 250,
+                  crid: 'creative123',
+                  adomain: ['example.com']
+                }
+              ]
+            }
+          ]
+        }
+      };
+
+      const request = spec.buildRequests([validBidRequest], bidderRequest);
+      const bids = spec.interpretResponse(responseWithCurrency, request);
+
+      expect(bids[0]).to.have.property('currency', 'EUR');
+    });
+
+    it('should not include dealId if not present in bid response', () => {
+      const request = spec.buildRequests([validBidRequest], bidderRequest);
+      const bids = spec.interpretResponse(serverResponse, request);
+
+      expect(bids[0]).to.not.have.property('dealId');
+    });
+
+    it('should return empty array if seatbid is not an array', () => {
+      const invalidResponse = {
+        body: {
+          id: '2def',
+          seatbid: 'invalid'
+        }
+      };
+
+      const request = spec.buildRequests([validBidRequest], bidderRequest);
+      const bids = spec.interpretResponse(invalidResponse, request);
+
+      expect(bids).to.be.an('array').that.is.empty;
+    });
+
+    it('should skip seatbid entries with empty bid arrays', () => {
+      const responseWithEmptyBids = {
+        body: {
+          id: '2def',
+          seatbid: [
+            { bid: [] },
+            {
+              bid: [
+                {
+                  id: '1abc',
+                  impid: '1abc',
+                  price: 1.5,
+                  adm: '<div>Ad</div>',
+                  w: 300,
+                  h: 250,
+                  crid: 'creative123',
+                  adomain: ['example.com']
+                }
+              ]
+            }
+          ]
+        }
+      };
+
+      const request = spec.buildRequests([validBidRequest], bidderRequest);
+      const bids = spec.interpretResponse(responseWithEmptyBids, request);
+
+      expect(bids).to.be.an('array').with.lengthOf(1);
+    });
+
+    it('should handle seatbid with non-array bid property', () => {
+      const invalidSeatbidResponse = {
+        body: {
+          id: '2def',
+          seatbid: [
+            { bid: 'invalid' }
+          ]
+        }
+      };
+
+      const request = spec.buildRequests([validBidRequest], bidderRequest);
+      const bids = spec.interpretResponse(invalidSeatbidResponse, request);
+
+      expect(bids).to.be.an('array').that.is.empty;
+    });
+  });
+
+  describe('isBidRequestValid - additional scenarios', () => {
+    it('should return true for valid video bid with all required fields', () => {
+      const validVideoBid = {
+        ...validBidRequest,
+        mediaTypes: {
+          video: {
+            mimes: ['video/mp4', 'video/webm'],
+            w: 640,
+            h: 480
+          }
+        }
+      };
+
+      expect(spec.isBidRequestValid(validVideoBid)).to.equal(true);
+    });
+
+    it('should return true for video bid without width and height (optional)', () => {
+      const videoBidNoSize = {
+        ...validBidRequest,
+        mediaTypes: {
+          video: {
+            mimes: ['video/mp4']
+          }
+        }
+      };
+
+      expect(spec.isBidRequestValid(videoBidNoSize)).to.equal(true);
+    });
+
+    it('should return true for banner-only bid', () => {
+      expect(spec.isBidRequestValid(validBidRequest)).to.equal(true);
+    });
+
+    it('should return true for bid with both banner and video', () => {
+      const multiMediaBid = {
+        ...validBidRequest,
+        mediaTypes: {
+          banner: {
+            sizes: [[300, 250]]
+          },
+          video: {
+            mimes: ['video/mp4'],
+            w: 640,
+            h: 480
+          }
+        }
+      };
+
+      expect(spec.isBidRequestValid(multiMediaBid)).to.equal(true);
+    });
+
+    it('should return true for video with negative width when width is null', () => {
+      const videoBid = {
+        ...validBidRequest,
+        mediaTypes: {
+          video: {
+            mimes: ['video/mp4'],
+            w: null,
+            h: 480
+          }
+        }
+      };
+
+      expect(spec.isBidRequestValid(videoBid)).to.equal(true);
+    });
+
+    it('should return false for video with width exactly 0', () => {
+      const videoBid = {
+        ...validBidRequest,
+        mediaTypes: {
+          video: {
+            mimes: ['video/mp4'],
+            w: 0,
+            h: 480
+          }
+        }
+      };
+
+      expect(spec.isBidRequestValid(videoBid)).to.equal(false);
+    });
+
+    it('should return false for video with negative width', () => {
+      const videoBid = {
+        ...validBidRequest,
+        mediaTypes: {
+          video: {
+            mimes: ['video/mp4'],
+            w: -100,
+            h: 480
+          }
+        }
+      };
+
+      expect(spec.isBidRequestValid(videoBid)).to.equal(false);
+    });
+
+    it('should return false for video with negative height', () => {
+      const videoBid = {
+        ...validBidRequest,
+        mediaTypes: {
+          video: {
+            mimes: ['video/mp4'],
+            w: 640,
+            h: -100
+          }
+        }
+      };
+
+      expect(spec.isBidRequestValid(videoBid)).to.equal(false);
     });
   });
 });

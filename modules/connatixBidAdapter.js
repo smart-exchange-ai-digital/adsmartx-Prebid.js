@@ -342,6 +342,15 @@ export const spec = {
       params['us_privacy'] = encodeURIComponent(uspConsent);
     }
 
+    if (gppConsent?.gppString && gppConsent?.applicableSections?.length) {
+      params['gpp'] = encodeURIComponent(gppConsent.gppString);
+      params['gpp_sid'] = gppConsent.applicableSections.join(',');
+    }
+
+    if (config.getConfig('coppa') === true) {
+      params['coppa'] = 1;
+    }
+
     window.addEventListener('message', function handler(event) {
       if (!event.data || event.origin !== 'https://cds.connatix.com' || !event.data.cnx) {
         return;
@@ -397,7 +406,7 @@ export const spec = {
     }
     const requestTimeout = connatixBidRequestTimeout.timeout;
     const timeout = isNumber(requestTimeout) ? requestTimeout : config.getConfig('bidderTimeout');
-    spec.triggerEvent({type: 'Timeout', timeout, context});
+    spec.triggerEvent({ type: 'Timeout', timeout, context });
   },
 
   /**
@@ -407,9 +416,9 @@ export const spec = {
     if (bidWinData == null) {
       return;
     }
-    const {bidder, cpm, requestId, bidId, adUnitCode, timeToRespond, auctionId} = bidWinData;
+    const { bidder, cpm, requestId, bidId, adUnitCode, timeToRespond, auctionId } = bidWinData;
 
-    spec.triggerEvent({type: 'BidWon', bestBidBidder: bidder, bestBidPrice: cpm, requestId, bidId, adUnitCode, timeToRespond, auctionId, context});
+    spec.triggerEvent({ type: 'BidWon', bestBidBidder: bidder, bestBidPrice: cpm, requestId, bidId, adUnitCode, timeToRespond, auctionId, context });
   },
 
   triggerEvent(data) {
